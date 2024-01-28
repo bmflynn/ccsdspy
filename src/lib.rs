@@ -25,12 +25,40 @@ struct PrimaryHeader {
     len_minus1: u16,
 }
 
+#[pymethods]
+impl PrimaryHeader {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+    fn __str__(&self) -> String {
+        format!(
+            "PrimaryHeader(version={}, type_flag={}, has_secondary_header={}, apid={}, sequence_flags={}, sequence_id={}, len_minus1={})",
+            self.version, self.type_flag, self.has_secondary_header, self.apid, self.sequence_flags, self.sequence_id, self.len_minus1,
+        ).to_owned()
+    }
+}
+
 #[pyclass]
 struct Packet {
     #[pyo3(get)]
     header: PrimaryHeader,
     #[pyo3(get)]
     data: Vec<u8>,
+}
+
+#[pymethods]
+impl Packet {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+    fn __str__(&self) -> String {
+        format!(
+            "Packet(header={}, data_len={})",
+            self.header.__str__(),
+            self.data.len()
+        )
+        .to_owned()
+    }
 }
 
 impl Packet {
@@ -95,6 +123,19 @@ enum RSState {
     NotPerformed,
 }
 
+#[pymethods]
+impl RSState {
+    fn __str__(&self) -> String {
+        match self {
+            Self::Ok => "ok",
+            Self::Corrected => "corrected",
+            Self::Uncorrectable => "uncorrectable",
+            Self::NotPerformed => "notperformed",
+        }
+        .to_owned()
+    }
+}
+
 #[pyclass]
 #[derive(Clone, Debug)]
 struct VCDUHeader {
@@ -114,6 +155,19 @@ struct VCDUHeader {
     counter_cycle: u8,
 }
 
+#[pymethods]
+impl VCDUHeader {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+    fn __str__(&self) -> String {
+        format!(
+            "VCDUHeader(version={}, scid={}, vcid={}, counter={}, replay={}, cycle={}, counter_cycle={})",
+            self.version, self.scid, self.vcid, self.counter, self.replay, self.cycle, self.counter_cycle,
+        ).to_owned()
+    }
+}
+
 #[pyclass]
 #[derive(Clone, Debug)]
 struct Frame {
@@ -123,6 +177,22 @@ struct Frame {
     rsstate: RSState,
     #[pyo3(get)]
     data: Vec<u8>,
+}
+
+#[pymethods]
+impl Frame {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+    fn __str__(&self) -> String {
+        format!(
+            "Frame(header={}, rsstate={}, data_len={})",
+            self.header.__str__(),
+            self.rsstate.__str__(),
+            self.data.len(),
+        )
+        .to_owned()
+    }
 }
 
 impl Frame {
@@ -285,6 +355,7 @@ fn ccsdspy(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_packets, m)?)?;
     m.add_class::<Packet>()?;
     m.add_class::<PrimaryHeader>()?;
+    m.add_class::<RSState>()?;
 
     m.add_function(wrap_pyfunction!(read_frames, m)?)?;
     m.add_function(wrap_pyfunction!(read_framed_packets, m)?)?;
