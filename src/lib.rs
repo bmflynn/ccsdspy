@@ -2,7 +2,7 @@ use chrono::{Datelike, Timelike};
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
-    types::{timezone_utc, PyDateTime},
+    types::{timezone_utc, PyDateTime, PyType},
 };
 use std::{fs::File, io::Read};
 
@@ -36,6 +36,22 @@ impl PrimaryHeader {
             self.version, self.type_flag, self.has_secondary_header, self.apid, self.sequence_flags, self.sequence_id, self.len_minus1,
         ).to_owned()
     }
+
+    #[classmethod]
+    fn decode(_cls: &PyType, dat: &[u8]) -> Option<Self> {
+        match ccsds::PrimaryHeader::decode(dat) {
+            Some(hdr) => Some(PrimaryHeader {
+                version: hdr.version,
+                type_flag: hdr.type_flag,
+                has_secondary_header: hdr.has_secondary_header,
+                apid: hdr.apid,
+                sequence_flags: hdr.sequence_flags,
+                sequence_id: hdr.sequence_id,
+                len_minus1: hdr.len_minus1,
+            }),
+            None => None,
+        }
+    }
 }
 
 #[pyclass]
@@ -58,6 +74,13 @@ impl Packet {
             self.data.len()
         )
         .to_owned()
+    }
+    #[classmethod]
+    fn decode(_cls: &PyType, dat: &[u8]) -> Option<Self> {
+        match ccsds::Packet::decode(dat) {
+            Some(p) => Some(Packet::new(p)),
+            None => None,
+        }
     }
 }
 

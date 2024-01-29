@@ -20,7 +20,7 @@ class VCDUHeader:
 class Frame:
     header: VCDUHeader
     rsstate: RSState
-    data: list[int]
+    data: bytes
 
 class PrimaryHeader:
     version: int
@@ -31,9 +31,17 @@ class PrimaryHeader:
     sequence_id: int
     len_minus1: int
 
+    @classmethod
+    def decode(cls, dat: bytes) -> PrimaryHeader:
+        """Decode `dat` into a PrimaryHeader"""
+
 class Packet:
     header: PrimaryHeader
-    data: list[int]
+    data: bytes
+
+    @classmethod
+    def decode(cls, dat: bytes) -> Packet:
+        """Decode `dat` into a Packet"""
 
 def read_packets(path: str) -> typing.Iterable[Packet]:
     """Decode packets from the file at `path`.
@@ -76,10 +84,10 @@ def read_framed_packets(
     :param trailer_len: Length of the trailer, or 0 if not used.
     """
 
-def decode_cdc_timecode(dat: bytearray) -> datetime:
+def decode_cdc_timecode(dat: bytes) -> datetime:
     """Decode provided bytes representing a CCSDS Day Segmented timecode into a UTC datetime"""
 
-def decode_eoscuc_timecode(dat: bytearray) -> datetime:
+def decode_eoscuc_timecode(dat: bytes) -> datetime:
     """Decode provided bytes representing a CCSDS Unsegmented Timecode as used by the
     NASA EOS mission (Aqua & Terra) into a UTC datetime.
     """
