@@ -17,5 +17,5 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version="0.19.2", features=["extension-module"]}
 # ccsds = { path = "../ccsds-rs" }
-ccsds = "0.1.0-alpha.4"
+ccsds = "0.1.0-alpha.5"
 chrono = "0.4.33"

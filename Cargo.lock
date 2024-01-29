@@ -46,7 +46,9 @@ dependencies = [
 
 [[package]]
 name = "ccsds"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e6c65b278e658512f1cf9fbeecca9ec62e58f3891768580d333deaaa0c16327"
 dependencies = [
  "chrono",
  "ndarray",
