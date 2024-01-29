@@ -1,9 +1,4 @@
-use chrono::{Datelike, Timelike};
-use pyo3::{
-    exceptions::PyValueError,
-    prelude::*,
-    types::{timezone_utc, PyDateTime, PyType},
-};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 use std::{fs::File, io::Read};
 
 #[pyclass]
@@ -323,39 +318,17 @@ fn read_framed_packets(
 }
 
 #[pyfunction]
-#[pyo3(pass_module)]
-fn decode_cds_timecode<'p>(m: &'p PyModule, dat: &'p [u8]) -> PyResult<&'p PyDateTime> {
+fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
     match ccsds::timecode::decode_cds_timecode(dat) {
-        Ok(tc) => PyDateTime::new(
-            m.py(),
-            tc.year(),
-            tc.month().try_into()?,
-            tc.day().try_into()?,
-            tc.hour().try_into()?,
-            tc.minute().try_into()?,
-            tc.second().try_into()?,
-            (tc.nanosecond() / 1000).try_into()?,
-            Some(timezone_utc(m.py())),
-        ),
+        Ok(tc) => Ok(tc.timestamp_millis()),
         Err(_) => Err(PyValueError::new_err("not enough bytes")),
     }
 }
 
 #[pyfunction]
-#[pyo3(pass_module)]
-fn decode_eoscuc_timecode<'p>(m: &'p PyModule, dat: &'p [u8]) -> PyResult<&'p PyDateTime> {
+fn decode_eoscuc_timecode(dat: &[u8]) -> PyResult<i64> {
     match ccsds::timecode::decode_eoscuc_timecode(dat) {
-        Ok(tc) => PyDateTime::new(
-            m.py(),
-            tc.year(),
-            tc.month().try_into()?,
-            tc.day().try_into()?,
-            tc.hour().try_into()?,
-            tc.minute().try_into()?,
-            tc.second().try_into()?,
-            (tc.nanosecond() / 1000).try_into()?,
-            Some(timezone_utc(m.py())),
-        ),
+        Ok(tc) => Ok(tc.timestamp_millis()),
         Err(_) => Err(PyValueError::new_err("not enough bytes")),
     }
 }
@@ -374,6 +347,7 @@ fn missing_frames(cur: u32, last: u32) -> PyResult<u32> {
 ///
 /// Python wrapper for the [ccsds](https://github.com/bmflynn/ccsds) Rust crate.
 #[pymodule]
+#[pyo3(name = "ccsds")]
 fn ccsdspy(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_packets, m)?)?;
     m.add_class::<Packet>()?;

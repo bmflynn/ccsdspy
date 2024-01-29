@@ -1,6 +1,5 @@
 import enum
 import typing
-from datetime import datetime
 
 class RSState(enum.Enum):
     OK = 0
@@ -84,12 +83,14 @@ def read_framed_packets(
     :param trailer_len: Length of the trailer, or 0 if not used.
     """
 
-def decode_cdc_timecode(dat: bytes) -> datetime:
-    """Decode provided bytes representing a CCSDS Day Segmented timecode into a UTC datetime"""
+def decode_cdc_timecode(dat: bytes) -> int:
+    """Decode provided bytes representing a CCSDS Day Segmented timecode into a UTC
+    timestamp in milliseconds.
+    """
 
-def decode_eoscuc_timecode(dat: bytes) -> datetime:
+def decode_eoscuc_timecode(dat: bytes) -> int:
     """Decode provided bytes representing a CCSDS Unsegmented Timecode as used by the
-    NASA EOS mission (Aqua & Terra) into a UTC datetime.
+    NASA EOS mission (Aqua & Terra) into a UTC timestamp in milliseconds.
     """
 
 def missing_packets(cur: int, last: int) -> int:

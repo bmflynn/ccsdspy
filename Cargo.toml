@@ -1,5 +1,5 @@
 [package]
-name = "ccsdspy"
+name = "ccsds"
 version = "0.1.0-alpha.5"
 authors = ["Bruce Flynn <brucef@ssec.wisc.edu>"]
 edition = "2021"
@@ -11,11 +11,9 @@ repository = "https://github.com/bmflynn/ccsdspy"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-name = "ccsdspy"
+name = "ccsds"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version="0.19.2", features=["extension-module"]}
-# ccsds = { path = "../ccsds-rs" }
+pyo3 = { version = "0.19.2", features = ["extension-module", "abi3-py37"] }
 ccsds = "0.1.0-alpha.5"
-chrono = "0.4.33"
