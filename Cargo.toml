@@ -16,4 +16,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.19.2", features = ["extension-module", "abi3-py37"] }
-ccsds = "0.1.0-alpha.5"
+# ccsds = "0.1.0-alpha.5"
+ccsds = { path = "../ccsds-rs" }

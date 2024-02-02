@@ -48,16 +48,6 @@ dependencies = [
 name = "ccsds"
 version = "0.1.0-alpha.5"
 dependencies = [
- "ccsds 0.1.0-alpha.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "pyo3",
-]
-
-[[package]]
-name = "ccsds"
-version = "0.1.0-alpha.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e6c65b278e658512f1cf9fbeecca9ec62e58f3891768580d333deaaa0c16327"
-dependencies = [
  "chrono",
  "ndarray",
  "rayon",
@@ -66,6 +56,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "threadpool",
+]
+
+[[package]]
+name = "ccsds"
+version = "0.1.0-alpha.6"
+dependencies = [
+ "ccsds 0.1.0-alpha.5",
+ "pyo3",
 ]
 
 [[package]]

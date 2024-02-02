@@ -34,8 +34,8 @@ impl PrimaryHeader {
 
     #[classmethod]
     fn decode(_cls: &PyType, dat: &[u8]) -> Option<Self> {
-        match ccsds::PrimaryHeader::decode(dat) {
-            Some(hdr) => Some(PrimaryHeader {
+        ccsds::PrimaryHeader::decode(dat).map(|hdr| {
+            Self{
                 version: hdr.version,
                 type_flag: hdr.type_flag,
                 has_secondary_header: hdr.has_secondary_header,
@@ -43,9 +43,8 @@ impl PrimaryHeader {
                 sequence_flags: hdr.sequence_flags,
                 sequence_id: hdr.sequence_id,
                 len_minus1: hdr.len_minus1,
-            }),
-            None => None,
-        }
+            }
+        })
     }
 }
 
@@ -72,10 +71,7 @@ impl Packet {
     }
     #[classmethod]
     fn decode(_cls: &PyType, dat: &[u8]) -> Option<Self> {
-        match ccsds::Packet::decode(dat) {
-            Some(p) => Some(Packet::new(p)),
-            None => None,
-        }
+        ccsds::Packet::decode(dat).map(Packet::new)
     }
 }
 
@@ -215,7 +211,7 @@ impl Frame {
 
 impl Frame {
     fn new(decoded_frame: ccsds::DecodedFrame) -> Self {
-        use ccsds::RSState::*;
+        use ccsds::RSState::{Corrected, NotPerformed, Ok, Uncorrectable};
         let frame = decoded_frame.frame;
         let h = frame.header;
         Frame {
@@ -260,13 +256,14 @@ impl FrameIterator {
 
 #[pyfunction]
 fn read_frames(path: &str, interleave: i32) -> PyResult<FrameIterator> {
-    let interleave: u8 = match interleave.try_into() {
-        Ok(x) => x,
-        Err(_) => return Err(PyValueError::new_err("interleave must be between 1 and 7")),
-    };
+    if !(2..=10).contains(&interleave) {
+        return Err(PyValueError::new_err(format!("improbable interleave value; expected 2..10: got {interleave}")));
+    }
+    let interleave: u8 = interleave.try_into().unwrap(); // checked above
 
     let file: Box<dyn Read + Send> = Box::new(File::open(path)?);
-    let frames = ccsds::FrameDecoderBuilder::new(255 * interleave as i32 + 4)
+    let frames = ccsds::FrameDecoderBuilder::new(255 * interleave as usize + 4)
+        .buffer_size(0)
         .reed_solomon_interleave(interleave)
         .build(file);
 
@@ -283,31 +280,35 @@ fn read_framed_packets(
     izone_len: Option<i32>,
     trailer_len: Option<i32>,
 ) -> PyResult<PacketIterator> {
-    let interleave: u8 = match interleave.try_into() {
-        Ok(x) => x,
-        Err(_) => return Err(PyValueError::new_err("interleave must be between 1 and 7")),
+    // Bunch of python proofing
+    if !(2..=10).contains(&interleave) {
+        return Err(PyValueError::new_err("invalid interleave value; expected 2..10: got {interleave}"))
+    }
+    let interleave: u8 = interleave.try_into().unwrap(); // checked above
+    if !(0..16384).contains(&scid) {
+        return Err(PyValueError::new_err(format!("invalid scid value; expected 0..16384, got {scid}")));
+    }
+    let scid: ccsds::SCID = scid.try_into().unwrap();
+    let izone_len: usize = if let Some(x) = izone_len {
+        if !(0..16).contains(&x) {
+            return Err(PyValueError::new_err(format!("invalid izone_len value; expected 0..16, got {x}")));
+        }
+        x.try_into().unwrap()
+    } else {
+        0
     };
-    let scid: u16 = match scid.try_into() {
-        Ok(x) => x,
-        Err(_) => return Err(PyValueError::new_err("scid must be between 1 and 16535")),
-    };
-    let izone_len: usize = match izone_len {
-        Some(x) => match x.try_into() {
-            Ok(x) => x,
-            Err(_) => return Err(PyValueError::new_err("izone_len must be >= 0")),
-        },
-        None => 0,
-    };
-    let trailer_len: usize = match trailer_len {
-        Some(x) => match x.try_into() {
-            Ok(x) => x,
-            Err(_) => return Err(PyValueError::new_err("izone_len must be >= 0")),
-        },
-        None => 0,
+    let trailer_len: usize = if let Some(x) = trailer_len {
+        if !(0..16).contains(&x) {
+            return Err(PyValueError::new_err(format!("invalid trailer_len value; expected 0..16, got {x}")));
+        }
+        x.try_into().unwrap()
+    } else {
+        0
     };
 
+    // TODO: take URI format so we can open sockets and such
     let file: Box<dyn Read + Send> = Box::new(File::open(path)?);
-    let frames = ccsds::FrameDecoderBuilder::new(255 * interleave as i32 + 4)
+    let frames = ccsds::FrameDecoderBuilder::new(255 * interleave as usize + 4)
         .reed_solomon_interleave(interleave)
         .build(file);
     let packets = ccsds::decode_framed_packets(scid, Box::new(frames), izone_len, trailer_len);
@@ -319,7 +320,7 @@ fn read_framed_packets(
 
 #[pyfunction]
 fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
-    match ccsds::timecode::decode_cds_timecode(dat) {
+    match ccsds::timecode::decode_cds(dat) {
         Ok(tc) => Ok(tc.timestamp_millis()),
         Err(_) => Err(PyValueError::new_err("not enough bytes")),
     }
@@ -327,20 +328,20 @@ fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
 
 #[pyfunction]
 fn decode_eoscuc_timecode(dat: &[u8]) -> PyResult<i64> {
-    match ccsds::timecode::decode_eoscuc_timecode(dat) {
+    match ccsds::timecode::decode_eoscuc(dat) {
         Ok(tc) => Ok(tc.timestamp_millis()),
         Err(_) => Err(PyValueError::new_err("not enough bytes")),
     }
 }
 
 #[pyfunction]
-fn missing_packets(cur: u16, last: u16) -> PyResult<u16> {
-    Ok(ccsds::missing_packets(cur, last))
+fn missing_packets(cur: u16, last: u16) -> u16 {
+    ccsds::missing_packets(cur, last)
 }
 
 #[pyfunction]
-fn missing_frames(cur: u32, last: u32) -> PyResult<u32> {
-    Ok(ccsds::missing_frames(cur, last))
+fn missing_frames(cur: u32, last: u32) -> u32 {
+    ccsds::missing_frames(cur, last)
 }
 
 /// ccsdspy
