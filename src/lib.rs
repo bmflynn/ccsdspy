@@ -1,5 +1,8 @@
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
-use std::{fs::File, io::Read};
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+};
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -34,16 +37,14 @@ impl PrimaryHeader {
 
     #[classmethod]
     fn decode(_cls: &PyType, dat: &[u8]) -> Option<Self> {
-        ccsds::PrimaryHeader::decode(dat).map(|hdr| {
-            Self{
-                version: hdr.version,
-                type_flag: hdr.type_flag,
-                has_secondary_header: hdr.has_secondary_header,
-                apid: hdr.apid,
-                sequence_flags: hdr.sequence_flags,
-                sequence_id: hdr.sequence_id,
-                len_minus1: hdr.len_minus1,
-            }
+        ccsds::PrimaryHeader::decode(dat).map(|hdr| Self {
+            version: hdr.version,
+            type_flag: hdr.type_flag,
+            has_secondary_header: hdr.has_secondary_header,
+            apid: hdr.apid,
+            sequence_flags: hdr.sequence_flags,
+            sequence_id: hdr.sequence_id,
+            len_minus1: hdr.len_minus1,
         })
     }
 }
@@ -93,6 +94,40 @@ impl Packet {
 }
 
 #[pyclass]
+struct DecodedPacket {
+    #[pyo3(get)]
+    scid: u16,
+    vcid: u16,
+    packet: Packet,
+}
+
+#[pymethods]
+impl DecodedPacket {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+    fn __str__(&self) -> String {
+        format!(
+            "DecodedPacket(scid={}, vcid={}, packet={})",
+            self.scid,
+            self.vcid,
+            self.packet.__str__(),
+        )
+        .to_owned()
+    }
+}
+
+impl DecodedPacket {
+    fn new(packet: ccsds::DecodedPacket) -> Self {
+        DecodedPacket {
+            scid: packet.scid,
+            vcid: packet.vcid,
+            packet: Packet::new(packet.packet),
+        }
+    }
+}
+
+#[pyclass]
 struct PacketIterator {
     packets: Box<dyn Iterator<Item = ccsds::Packet> + Send>,
 }
@@ -108,24 +143,40 @@ impl PacketIterator {
             Some(packet) => Py::new(slf.py(), Packet::new(packet)).ok(),
             None => None,
         }
-        // slf.packets.get(index).map(|user| user.clone_ref(slf.py()))
     }
 }
 
-/// Formats the sum of two numbers as string.
 #[pyfunction]
-fn read_packets(path: PyObject) -> PyResult<PacketIterator> {
+fn decode_packets(path: PyObject) -> PyResult<PacketIterator> {
     let path = match Python::with_gil(|py| -> PyResult<String> { path.extract(py) }) {
         Ok(s) => s,
         Err(e) => return Err(e),
     };
 
     let file: Box<dyn Read + Send> = Box::new(File::open(path)?);
-    let packets = ccsds::read_packets(file).filter_map(Result::ok);
+    let packets: Box<dyn Iterator<Item = ccsds::Packet> + Send + 'static> =
+        Box::new(ccsds::read_packets(file).filter_map(Result::ok));
 
-    Ok(PacketIterator {
-        packets: Box::new(packets),
-    })
+    Ok(PacketIterator { packets })
+}
+
+#[pyclass]
+struct DecodedPacketIterator {
+    packets: Box<dyn Iterator<Item = ccsds::DecodedPacket> + Send>,
+}
+
+#[pymethods]
+impl DecodedPacketIterator {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<Py<DecodedPacket>> {
+        match slf.packets.next() {
+            Some(packet) => Py::new(slf.py(), DecodedPacket::new(packet)).ok(),
+            None => None,
+        }
+    }
 }
 
 #[pyclass]
@@ -254,44 +305,58 @@ impl FrameIterator {
     }
 }
 
-#[pyfunction]
-fn read_frames(path: &str, interleave: i32) -> PyResult<FrameIterator> {
-    if !(2..=10).contains(&interleave) {
-        return Err(PyValueError::new_err(format!("improbable interleave value; expected 2..10: got {interleave}")));
+#[pyfunction(signature=(source, frame_len, interleave=None))]
+fn decode_frames(source: &str, frame_len: i32, interleave: Option<i32>) -> PyResult<FrameIterator> {
+    if frame_len < 0 {
+        return Err(PyValueError::new_err("frame_size cannot be > 0"));
     }
-    let interleave: u8 = interleave.try_into().unwrap(); // checked above
+    let file: Box<dyn Read + Send> = Box::new(File::open(source)?);
+    let blocks =
+        ccsds::Synchronizer::new(file, &ccsds::ASM.to_vec(), frame_len.try_into().unwrap())
+            .into_iter()
+            .filter_map(Result::ok);
 
-    let file: Box<dyn Read + Send> = Box::new(File::open(path)?);
-    let frames = ccsds::FrameDecoderBuilder::new(255 * interleave as usize + 4)
-        .buffer_size(0)
-        .reed_solomon_interleave(interleave)
-        .build(file);
+    let mut builder = ccsds::FrameDecoderBuilder::default();
+
+    if let Some(interleave) = interleave {
+        if !(2..=10).contains(&interleave) {
+            return Err(PyValueError::new_err(format!(
+                "improbable interleave value; expected 2..10: got {interleave}"
+            )));
+        }
+        let interleave: u8 = interleave.try_into().unwrap(); // checked above
+        builder = builder.reed_solomon_interleave(interleave);
+    }
+
+    let frames = builder.build(blocks).filter_map(Result::ok);
 
     Ok(FrameIterator {
         frames: Box::new(frames),
     })
 }
-
-#[pyfunction(signature=(path, scid, interleave, izone_len=0, trailer_len=0))]
-fn read_framed_packets(
-    path: &str,
+#[pyfunction(signature=(source, scid, frame_len, izone_len=0, trailer_len=0, interleave=None))]
+fn decode_framed_packets(
+    source: &str,
     scid: i32,
-    interleave: i32,
+    frame_len: i32,
     izone_len: Option<i32>,
     trailer_len: Option<i32>,
-) -> PyResult<PacketIterator> {
-    // Bunch of python proofing
-    if !(2..=10).contains(&interleave) {
-        return Err(PyValueError::new_err("invalid interleave value; expected 2..10: got {interleave}"))
+    interleave: Option<i32>,
+) -> PyResult<DecodedPacketIterator> {
+    if frame_len < 0 {
+        return Err(PyValueError::new_err("frame_size cannot be > 0"));
     }
-    let interleave: u8 = interleave.try_into().unwrap(); // checked above
     if !(0..16384).contains(&scid) {
-        return Err(PyValueError::new_err(format!("invalid scid value; expected 0..16384, got {scid}")));
+        return Err(PyValueError::new_err(format!(
+            "invalid scid value; expected 0..16384, got {scid}"
+        )));
     }
     let scid: ccsds::SCID = scid.try_into().unwrap();
     let izone_len: usize = if let Some(x) = izone_len {
         if !(0..16).contains(&x) {
-            return Err(PyValueError::new_err(format!("invalid izone_len value; expected 0..16, got {x}")));
+            return Err(PyValueError::new_err(format!(
+                "invalid izone_len value; expected 0..16, got {x}"
+            )));
         }
         x.try_into().unwrap()
     } else {
@@ -299,26 +364,41 @@ fn read_framed_packets(
     };
     let trailer_len: usize = if let Some(x) = trailer_len {
         if !(0..16).contains(&x) {
-            return Err(PyValueError::new_err(format!("invalid trailer_len value; expected 0..16, got {x}")));
+            return Err(PyValueError::new_err(format!(
+                "invalid trailer_len value; expected 0..16, got {x}"
+            )));
         }
         x.try_into().unwrap()
     } else {
         0
     };
 
-    // TODO: take URI format so we can open sockets and such
-    let file: Box<dyn Read + Send> = Box::new(File::open(path)?);
-    let frames = ccsds::FrameDecoderBuilder::new(255 * interleave as usize + 4)
-        .reed_solomon_interleave(interleave)
-        .build(file);
-    let packets = ccsds::decode_framed_packets(scid, Box::new(frames), izone_len, trailer_len);
+    let file = BufReader::new(File::open(source)?);
+    let blocks =
+        ccsds::Synchronizer::new(file, &ccsds::ASM.to_vec(), frame_len.try_into().unwrap())
+            .into_iter()
+            .filter_map(Result::ok);
 
-    Ok(PacketIterator {
-        packets: Box::new(packets),
-    })
+    let mut builder = ccsds::FrameDecoderBuilder::default();
+    if let Some(interleave) = interleave {
+        if !(2..=10).contains(&interleave) {
+            return Err(PyValueError::new_err(
+                "invalid interleave value; expected 2..10: got {interleave}",
+            ));
+        }
+        let interleave: u8 = interleave.try_into().unwrap(); // checked above
+        builder = builder.reed_solomon_interleave(interleave);
+    }
+    let frames = builder.build(blocks).filter_map(Result::ok);
+
+    let packets: Box<dyn Iterator<Item = ccsds::DecodedPacket> + Send + 'static> = Box::new(
+        ccsds::decode_framed_packets(scid, frames, izone_len, trailer_len),
+    );
+
+    Ok(DecodedPacketIterator { packets })
 }
 
-#[pyfunction]
+#[pyfunction(signature=(dat))]
 fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
     match ccsds::timecode::decode_cds(dat) {
         Ok(tc) => Ok(tc.timestamp_millis()),
@@ -326,7 +406,7 @@ fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
     }
 }
 
-#[pyfunction]
+#[pyfunction(signature=(dat))]
 fn decode_eoscuc_timecode(dat: &[u8]) -> PyResult<i64> {
     match ccsds::timecode::decode_eoscuc(dat) {
         Ok(tc) => Ok(tc.timestamp_millis()),
@@ -334,12 +414,12 @@ fn decode_eoscuc_timecode(dat: &[u8]) -> PyResult<i64> {
     }
 }
 
-#[pyfunction]
+#[pyfunction(signature=(cur, last))]
 fn missing_packets(cur: u16, last: u16) -> u16 {
     ccsds::missing_packets(cur, last)
 }
 
-#[pyfunction]
+#[pyfunction(signature=(cur, last))]
 fn missing_frames(cur: u32, last: u32) -> u32 {
     ccsds::missing_frames(cur, last)
 }
@@ -350,13 +430,14 @@ fn missing_frames(cur: u32, last: u32) -> u32 {
 #[pymodule]
 #[pyo3(name = "ccsds")]
 fn ccsdspy(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(read_packets, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_packets, m)?)?;
     m.add_class::<Packet>()?;
+    m.add_class::<DecodedPacket>()?;
     m.add_class::<PrimaryHeader>()?;
     m.add_class::<RSState>()?;
 
-    m.add_function(wrap_pyfunction!(read_frames, m)?)?;
-    m.add_function(wrap_pyfunction!(read_framed_packets, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_frames, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_framed_packets, m)?)?;
     m.add_class::<Frame>()?;
     m.add_class::<VCDUHeader>()?;
 

@@ -42,50 +42,110 @@ class Packet:
     def decode(cls, dat: bytes) -> Packet:
         """Decode `dat` into a Packet"""
 
-def read_packets(path: str) -> typing.Iterable[Packet]:
-    """Decode packets from the file at `path`.
+class DecodedPacket:
+    scid: int
+    vcid: int
+    packet: Packet
 
-    The file must be byte-aligned and packets must be contiguous.
+def decode_packets(source: str) -> typing.Iterable[Packet]:
+    """Decode space packet data from the provided source.
+
+    Parameters
+    ----------
+    source : str
+        Source providing stream of space packets to decode. Currently only local
+        file paths are supported.
+
+    Returns
+    -------
+        Iterator of Packets
     """
 
-def read_frames(path: str, interleave: int) -> typing.Iterable[Frame]:
-    """Decode frames from the file at `path`.
+def decode_frames(
+    source: str, frame_len: int, interleave: int
+) -> typing.Iterable[Frame]:
+    """Decode frames from the byte stream provided by source.
 
-    Standard CCSDS decoding is performed so pseudo-noise is removed and Reed-Solomon
-    FEC (223/255) is applied. Each frames `rsstate` will indicate the RS disposition.
+    The stream is assumed to be a standard CCSDS CADU stream, i.e., pseudo-noise encoded,
+    utilizing the standard attached sync marker, and optionally using Reed-Solomon forward
+    error correction.
 
-    :param path: Path to a file containing CADUs. The data need not by synchronized.
-    :param interleave:
-        RS interleave; typically 4 or 5. This value sets the expected size of a CADU (ASM + RS
-        codeblock), i.e., cadu_len = (255 * <interleave>) + 4, where 255 is the RS message size
-        and 4 is the length of the standard ASM.
+    Parameters
+    ----------
+    source: str
+        Source of stream containing CADUs using the standard CCSDS ASM that are pseudo
+        randomized. Currently, only local file paths are supported.
+
+    frame_len : int
+        Length of each frame. This will be the overall CADU length minus the ASM bytes.
+        If using Reed-Solomon this must be the interleave * RS message size (255). If
+        this value is < 0 a ValueError will be raised.
+
+    interleave : int
+        The Reed-Solomon interleave. Typical values include 4 o4 5. If this is not set
+        no Reed-Solomon FEC is used and it is assumed the frames will not include any
+        Reed-Solomon parity bytes.
+
+    Returns
+    -------
+    FrameIterator
+        An interable providing all decoded Frames.
     """
 
-def read_framed_packets(
-    path: str,
+def decode_framed_packets(
+    source: str,
     scid: int,
-    interleave: int,
+    frame_len: int,
     izone_len: int = 0,
     trailer_len: int = 0,
-) -> typing.Iterable[Packet]:
-    """Decode packets from the CADU file at `path`.
+    interleave: int | None = None,
+) -> typing.Iterable[DecodedPacket]:
+    """
+    Decode space packets from the byte stream provided by source.
 
-    Standard CCSDS decoding is performed so pseudo-noise is removed and Reed-Solomon
-    FEC (223/255) is applied. Each frames `rsstate` will indicate the RS disposition.
+    The stream is assumed to be a standard CCSDS CADU stream, i.e., pseudo-noise encoded,
+    utilizing the standard attached sync marker, and optionally using Reed-Solomon forward
+    error correction.
 
-    :param path: Path to a file containing CADUs. The data need not by synchronized.
-    :param scid: Spacecraft identifier. Any frames with an SCID other than this will be dropped.
-    :param interleave:
-        RS interleave; typically 4 or 5. This value sets the expected size of a CADU (ASM + RS
-        codeblock), i.e., cadu_len = (255 * <interleave>) + 4, where 255 is the RS message size
-        and 4 is the length of the standard ASM.
-    :param izone_len: Length of the insert zone, or 0 if not used.
-    :param trailer_len: Length of the trailer, or 0 if not used.
+    Parameters
+    ----------
+    source: str
+        Source of stream containing CADUs using the standard CCSDS ASM that are pseudo
+        randomized. Currently, only local file paths are supported.
+
+    scid : int
+        Spacecraft identifier for the spacecraft that is the source of the data
+
+    frame_len : int
+        Length of each frame. This will be the overall CADU length minus the ASM bytes.
+        If using Reed-Solomon this must be the interleave * RS message size (255). If
+        this value is < 0 a ValueError will be raised.
+
+    izone_len : int
+        Frame insert-zone number of bytes used by the spacecraft, if any.
+
+    trailer_len : int
+        Frame trailer number of bytes used by the spacecraft, if any.
+
+    interleave : int
+        The Reed-Solomon interleave. Typical values include 4 o4 5. If this is not set
+        no Reed-Solomon FEC is used and it is assumed the frames will not include any
+        Reed-Solomon parity bytes.
+
+    Returns
+    -------
+    DecodedPacketIterator
+        An interable providing all DecodedPackets
     """
 
 def decode_cdc_timecode(dat: bytes) -> int:
-    """Decode provided bytes representing a CCSDS Day Segmented timecode into a UTC
-    timestamp in milliseconds.
+    """Decode the provided CCSDS Day-Segmented timecode bytes into UTC milliseconds.
+
+    Parameters
+    ----------
+    dat : bytearray
+        Byte array of at least 8 bytes for a CSD timecode. Only the first 8 are used
+        if there are more. Raises a ValueError if there are not enough bytes to decode.
     """
 
 def decode_eoscuc_timecode(dat: bytes) -> int:
@@ -95,12 +155,8 @@ def decode_eoscuc_timecode(dat: bytes) -> int:
 
 def missing_packets(cur: int, last: int) -> int:
     """Calculate the number of missing packets between cur and last.
-
-    :rasies OverflowError: If cur or last doesn't fit in a u16.
     """
 
 def missing_frames(cur: int, last: int) -> int:
     """Calculate the number of missing frames between cur and last.
-
-    :rasies OverflowError: If cur or last doesn't fit in a u32.
     """
