@@ -6,3 +6,8 @@
 Rust bindings using [pyo3](https://pyo3.rs).
 
 
+## Related
+
+* [spacecraftsdb](https://github.com/bmflynn/spacecraftsdb): JSON Spacecraft metadata database
+* [spacecrafts-rs](https://github.com/bmflynn/spacecrafts-rs): Rust crate interfacing with `spacecraftsdb`
+* [ccsds-rs](https://github.com/bmflynn/ccsds-rs): Rust crate for CCSDS spacecraft frame & spacepacket decoding

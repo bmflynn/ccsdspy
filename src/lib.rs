@@ -29,6 +29,9 @@ struct PrimaryHeader {
 
 #[pymethods]
 impl PrimaryHeader {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         format!(
             "PrimaryHeader(version={}, type_flag={}, has_secondary_header={}, apid={}, sequence_flags={}, sequence_id={}, len_minus1={})",
@@ -60,6 +63,9 @@ struct Packet {
 
 #[pymethods]
 impl Packet {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         format!(
             "Packet(header={}, data_len={})",
@@ -101,6 +107,9 @@ struct DecodedPacket {
 
 #[pymethods]
 impl DecodedPacket {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         format!(
             "DecodedPacket(scid={}, vcid={}, packet={})",
@@ -196,6 +205,9 @@ enum RSState {
 
 #[pymethods]
 impl RSState {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         match self {
             Self::Ok => "ok",
@@ -228,6 +240,9 @@ struct VCDUHeader {
 
 #[pymethods]
 impl VCDUHeader {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         format!(
             "VCDUHeader(version={}, scid={}, vcid={}, counter={}, replay={}, cycle={}, counter_cycle={})",
@@ -249,6 +264,9 @@ struct Frame {
 
 #[pymethods]
 impl Frame {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         format!(
             "Frame(header={}, rsstate={}, data_len={})",
@@ -526,6 +544,9 @@ impl PnConfig {
 
 #[pymethods]
 impl PnConfig {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         "PnConfig()".to_string()
     }
@@ -544,6 +565,9 @@ pub struct RSConfig {
 
 #[pymethods]
 impl RSConfig {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         format!(
             "RSConfig(interleave={}, virtual_fill_length={}, num_correctable={})",
@@ -594,6 +618,9 @@ impl FramingConfig {
 
 #[pymethods]
 impl FramingConfig {
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
     fn __str__(&self) -> String {
         let pn = match &self.pseudo_noise {
             Some(pn) => pn.__str__(),
@@ -617,8 +644,8 @@ impl FramingConfig {
 }
 
 #[pyfunction]
-fn framing_config(scid: u16) -> PyResult<Option<FramingConfig>> {
-    match ccsds::framing_config(scid) {
+fn framing_config(scid: u16, path: Option<&str>) -> PyResult<Option<FramingConfig>> {
+    match ccsds::framing_config(scid, path) {
         Ok(Some(framing)) => Ok(Some(FramingConfig::new(framing))),
         Ok(None) => Ok(None),
         Err(err) => Err(PyFileNotFoundError::new_err(format!("{err}"))),

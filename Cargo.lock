@@ -60,14 +60,14 @@ dependencies = [
 name = "ccsds"
 version = "0.1.0-beta.1"
 dependencies = [
- "ccsds 0.1.0-beta.2",
+ "ccsds 0.1.0-beta.3",
  "pyo3",
  "spacecrafts",
 ]
 
 [[package]]
 name = "ccsds"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "crossbeam",
@@ -577,9 +577,7 @@ checksum = "e6ecd384b10a64542d77071bd64bd7b231f4ed5940fba55e98c3de13824cf3d7"
 
 [[package]]
 name = "spacecrafts"
-version = "0.1.0-beta.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed3b622495d338e51e4da0721582080c58cc1db56b74be5dfed1c8e81cbdfc1e"
+version = "0.1.0-beta.3"
 dependencies = [
  "anyhow",
  "dirs",
