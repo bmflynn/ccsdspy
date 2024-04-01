@@ -1,4 +1,8 @@
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
+use pyo3::{
+    exceptions::{PyFileNotFoundError, PyValueError},
+    prelude::*,
+    types::PyType,
+};
 use std::{
     fs::File,
     io::{BufReader, Read},
@@ -25,9 +29,6 @@ struct PrimaryHeader {
 
 #[pymethods]
 impl PrimaryHeader {
-    fn __repr__(&self) -> String {
-        self.__str__()
-    }
     fn __str__(&self) -> String {
         format!(
             "PrimaryHeader(version={}, type_flag={}, has_secondary_header={}, apid={}, sequence_flags={}, sequence_id={}, len_minus1={})",
@@ -59,9 +60,6 @@ struct Packet {
 
 #[pymethods]
 impl Packet {
-    fn __repr__(&self) -> String {
-        self.__str__()
-    }
     fn __str__(&self) -> String {
         format!(
             "Packet(header={}, data_len={})",
@@ -103,9 +101,6 @@ struct DecodedPacket {
 
 #[pymethods]
 impl DecodedPacket {
-    fn __repr__(&self) -> String {
-        self.__str__()
-    }
     fn __str__(&self) -> String {
         format!(
             "DecodedPacket(scid={}, vcid={}, packet={})",
@@ -146,9 +141,20 @@ impl PacketIterator {
     }
 }
 
+/// Decode space packet data from the provided source.
+///
+/// Parameters
+/// ----------
+/// source : str
+///     Source providing stream of space packets to decode. Currently only local
+///     file paths are supported.
+///
+/// Returns
+/// -------
+///     Iterator of Packets
 #[pyfunction]
-fn decode_packets(path: PyObject) -> PyResult<PacketIterator> {
-    let path = match Python::with_gil(|py| -> PyResult<String> { path.extract(py) }) {
+fn decode_packets(source: PyObject) -> PyResult<PacketIterator> {
+    let path = match Python::with_gil(|py| -> PyResult<String> { source.extract(py) }) {
         Ok(s) => s,
         Err(e) => return Err(e),
     };
@@ -222,9 +228,6 @@ struct VCDUHeader {
 
 #[pymethods]
 impl VCDUHeader {
-    fn __repr__(&self) -> String {
-        self.__str__()
-    }
     fn __str__(&self) -> String {
         format!(
             "VCDUHeader(version={}, scid={}, vcid={}, counter={}, replay={}, cycle={}, counter_cycle={})",
@@ -246,9 +249,6 @@ struct Frame {
 
 #[pymethods]
 impl Frame {
-    fn __repr__(&self) -> String {
-        self.__str__()
-    }
     fn __str__(&self) -> String {
         format!(
             "Frame(header={}, rsstate={}, data_len={})",
@@ -305,6 +305,35 @@ impl FrameIterator {
     }
 }
 
+/// Decode frames from the byte stream provided by source.
+///
+/// The decode synchronization process starts immediately in the background and progresses
+/// until the first sync marker is found.
+///
+/// The stream is assumed to be a standard CCSDS CADU stream, i.e., pseudo-noise encoded,
+/// utilizing the standard attached sync marker, and optionally using Reed-Solomon forward
+/// error correction.
+///
+/// Parameters
+/// ----------
+/// source: str
+///     Source of stream containing CADUs using the standard CCSDS ASM that are pseudo
+///     randomized. Currently, only local file paths are supported.
+///
+/// frame_len : int
+///     Length of each frame. This will be the overall CADU length minus the ASM bytes.
+///     If using Reed-Solomon this must be the interleave * RS message size (255). If
+///     this value is < 0 a ValueError will be raised.
+///
+/// interleave : int
+///     The Reed-Solomon interleave. Typical values include 4 o4 5. If this is not set
+///     no Reed-Solomon FEC is used and it is assumed the frames will not include any
+///     Reed-Solomon parity bytes.
+///
+/// Returns
+/// -------
+/// FrameIterator
+///     An interable providing all decoded Frames.
 #[pyfunction(signature=(source, frame_len, interleave=None))]
 fn decode_frames(source: &str, frame_len: i32, interleave: Option<i32>) -> PyResult<FrameIterator> {
     if frame_len < 0 {
@@ -328,23 +357,66 @@ fn decode_frames(source: &str, frame_len: i32, interleave: Option<i32>) -> PyRes
         builder = builder.reed_solomon_interleave(interleave);
     }
 
-    let frames = builder.build(blocks).filter_map(Result::ok);
+    let frames = builder.build().start(blocks).filter_map(Result::ok);
 
     Ok(FrameIterator {
         frames: Box::new(frames),
     })
 }
-#[pyfunction(signature=(source, scid, frame_len, izone_len=0, trailer_len=0, interleave=None))]
+
+/// Decode space packets from the byte stream provided by source.
+///
+/// The decode synchronization process starts immediately in the background and progresses
+/// until the first sync marker is found.
+///
+/// The stream is assumed to be a standard CCSDS CADU stream, i.e., pseudo-noise encoded,
+/// utilizing the standard attached sync marker, and optionally using Reed-Solomon forward
+/// error correction.
+///
+/// Parameters
+/// ----------
+/// source: str
+///     Source of stream containing CADUs using the standard CCSDS ASM that are pseudo
+///     randomized. Currently, only local file paths are supported.
+///
+/// scid : int
+///     Spacecraft identifier for the spacecraft that is the source of the data
+///
+/// cadu_len: int
+///     The length of the CADU, i.e., the ASM length plus the length of the frame plus the
+///     length of any integrity or parity bytes.
+///
+///     When using Reed-Solomon, this will typically be 1024 for interleave=4 and 1279 when
+///     using interleave=5.
+///
+/// izone_len : int
+///     Frame insert-zone number of bytes used by the spacecraft, if any.
+///
+/// trailer_len : int
+///     Frame trailer number of bytes used by the spacecraft, if any.
+///
+/// interleave : int
+///     The Reed-Solomon interleave. Typical values include 4 o4 5. If this is not set
+///     no Reed-Solomon FEC is used and it is assumed the frames will not include any
+///     Reed-Solomon parity bytes.
+///
+/// Returns
+/// -------
+/// DecodedPacketIterator
+///     An interable providing all DecodedPackets
+#[pyfunction(signature=(source, scid, cadu_len, izone_len=0, trailer_len=0, interleave=None))]
 fn decode_framed_packets(
     source: &str,
     scid: i32,
-    frame_len: i32,
+    cadu_len: i32,
     izone_len: Option<i32>,
     trailer_len: Option<i32>,
     interleave: Option<i32>,
 ) -> PyResult<DecodedPacketIterator> {
-    if frame_len < 0 {
-        return Err(PyValueError::new_err("frame_size cannot be > 0"));
+    if cadu_len < 4 {
+        return Err(PyValueError::new_err(
+            "cadu_len cannot be less than the ASM size (4)",
+        ));
     }
     if !(0..16384).contains(&scid) {
         return Err(PyValueError::new_err(format!(
@@ -374,10 +446,10 @@ fn decode_framed_packets(
     };
 
     let file = BufReader::new(File::open(source)?);
-    let blocks =
-        ccsds::Synchronizer::new(file, &ccsds::ASM.to_vec(), frame_len.try_into().unwrap())
-            .into_iter()
-            .filter_map(Result::ok);
+    let block_size: usize = usize::try_from(cadu_len).unwrap() - ccsds::ASM.len();
+    let blocks = ccsds::Synchronizer::new(file, &ccsds::ASM.to_vec(), block_size)
+        .into_iter()
+        .filter_map(Result::ok);
 
     let mut builder = ccsds::FrameDecoderBuilder::default();
     if let Some(interleave) = interleave {
@@ -389,7 +461,7 @@ fn decode_framed_packets(
         let interleave: u8 = interleave.try_into().unwrap(); // checked above
         builder = builder.reed_solomon_interleave(interleave);
     }
-    let frames = builder.build(blocks).filter_map(Result::ok);
+    let frames = builder.build().start(blocks).filter_map(Result::ok);
 
     let packets: Box<dyn Iterator<Item = ccsds::DecodedPacket> + Send + 'static> = Box::new(
         ccsds::decode_framed_packets(scid, frames, izone_len, trailer_len),
@@ -398,6 +470,13 @@ fn decode_framed_packets(
     Ok(DecodedPacketIterator { packets })
 }
 
+/// Decode the provided CCSDS Day-Segmented timecode bytes into UTC milliseconds.
+///
+/// Parameters
+/// ----------
+/// dat : bytearray
+///     Byte array of at least 8 bytes for a CSD timecode. Only the first 8 are used
+///     if there are more. Raises a ValueError if there are not enough bytes to decode.
 #[pyfunction(signature=(dat))]
 fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
     match ccsds::timecode::decode_cds(dat) {
@@ -406,6 +485,8 @@ fn decode_cds_timecode(dat: &[u8]) -> PyResult<i64> {
     }
 }
 
+/// Decode provided bytes representing a CCSDS Unsegmented Timecode as used by the
+/// NASA EOS mission (Aqua & Terra) into a UTC timestamp in milliseconds.
 #[pyfunction(signature=(dat))]
 fn decode_eoscuc_timecode(dat: &[u8]) -> PyResult<i64> {
     match ccsds::timecode::decode_eoscuc(dat) {
@@ -414,17 +495,137 @@ fn decode_eoscuc_timecode(dat: &[u8]) -> PyResult<i64> {
     }
 }
 
+/// Calculate the number of missing packets between cur and last.
+///
+/// Note, packet sequence counters are per-APID.
 #[pyfunction(signature=(cur, last))]
 fn missing_packets(cur: u16, last: u16) -> u16 {
     ccsds::missing_packets(cur, last)
 }
 
+/// Calculate the number of missing frames between cur and last.
+///
+/// Note frame sequence counts are per-VCID.
 #[pyfunction(signature=(cur, last))]
 fn missing_frames(cur: u32, last: u32) -> u32 {
     ccsds::missing_frames(cur, last)
 }
 
-/// ccsdspy
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PnConfig;
+
+impl PnConfig {
+    fn new(config: Option<spacecrafts::PnConfig>) -> Option<Self> {
+        match config {
+            Some(_) => Some(Self {}),
+            None => None,
+        }
+    }
+}
+
+#[pymethods]
+impl PnConfig {
+    fn __str__(&self) -> String {
+        "PnConfig()".to_string()
+    }
+}
+
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct RSConfig {
+    #[pyo3(get)]
+    pub interleave: u8,
+    #[pyo3(get)]
+    pub virtual_fill_length: usize,
+    #[pyo3(get)]
+    pub num_correctable: u32,
+}
+
+#[pymethods]
+impl RSConfig {
+    fn __str__(&self) -> String {
+        format!(
+            "RSConfig(interleave={}, virtual_fill_length={}, num_correctable={})",
+            self.interleave, self.virtual_fill_length, self.num_correctable
+        )
+    }
+}
+
+impl RSConfig {
+    fn new(config: Option<spacecrafts::RSConfig>) -> Option<Self> {
+        match config {
+            Some(rs) => Some(Self {
+                interleave: rs.interleave,
+                virtual_fill_length: rs.virtual_fill_length,
+                num_correctable: rs.num_correctable,
+            }),
+            None => None,
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Debug)]
+pub struct FramingConfig {
+    #[pyo3(get)]
+    pub length: usize,
+    #[pyo3(get)]
+    pub insert_zone_length: usize,
+    #[pyo3(get)]
+    pub trailer_length: usize,
+    #[pyo3(get)]
+    pub pseudo_noise: Option<PnConfig>,
+    #[pyo3(get)]
+    pub reed_solomon: Option<RSConfig>,
+}
+
+impl FramingConfig {
+    fn new(config: spacecrafts::FramingConfig) -> Self {
+        Self {
+            length: config.length,
+            insert_zone_length: config.insert_zone_length,
+            trailer_length: config.trailer_length,
+            pseudo_noise: PnConfig::new(config.pseudo_noise),
+            reed_solomon: RSConfig::new(config.reed_solomon),
+        }
+    }
+}
+
+#[pymethods]
+impl FramingConfig {
+    fn __str__(&self) -> String {
+        let pn = match &self.pseudo_noise {
+            Some(pn) => pn.__str__(),
+            None => "None".to_string(),
+        };
+        let rs = match &self.reed_solomon {
+            Some(rs) => rs.__str__(),
+            None => "None".to_string(),
+        };
+        format!("FramingConfig(length={}, insert_zone_length={}, trailer_length={}, pseudo_noise={}, reed_solomon={})",
+        self.length, self.insert_zone_length, self.trailer_length, pn, rs).to_string()
+    }
+
+    /// Length of the RS codeblock.
+    pub fn codeblock_len(&self) -> usize {
+        match &self.reed_solomon {
+            Some(rs) => self.length + 2 * rs.num_correctable as usize * rs.interleave as usize,
+            None => self.length,
+        }
+    }
+}
+
+#[pyfunction]
+fn framing_config(scid: u16) -> PyResult<Option<FramingConfig>> {
+    match ccsds::framing_config(scid) {
+        Ok(Some(framing)) => Ok(Some(FramingConfig::new(framing))),
+        Ok(None) => Ok(None),
+        Err(err) => Err(PyFileNotFoundError::new_err(format!("{err}"))),
+    }
+}
+
+/// ccsds
 ///
 /// Python wrapper for the [ccsds](https://github.com/bmflynn/ccsds) Rust crate.
 #[pymodule]
@@ -446,6 +647,7 @@ fn ccsdspy(_py: Python, m: &PyModule) -> PyResult<()> {
 
     m.add_function(wrap_pyfunction!(missing_packets, m)?)?;
     m.add_function(wrap_pyfunction!(missing_frames, m)?)?;
+    m.add_function(wrap_pyfunction!(framing_config, m)?)?;
 
     Ok(())
 }
