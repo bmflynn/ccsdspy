@@ -372,7 +372,7 @@ fn decode_frames(source: &str, frame_len: i32, interleave: Option<i32>) -> PyRes
             )));
         }
         let interleave: u8 = interleave.try_into().unwrap(); // checked above
-        builder = builder.reed_solomon_interleave(interleave);
+        builder = builder.reed_solomon(interleave);
     }
 
     let frames = builder.build().start(blocks).filter_map(Result::ok);
@@ -477,7 +477,7 @@ fn decode_framed_packets(
             ));
         }
         let interleave: u8 = interleave.try_into().unwrap(); // checked above
-        builder = builder.reed_solomon_interleave(interleave);
+        builder = builder.reed_solomon(interleave);
     }
     let frames = builder.build().start(blocks).filter_map(Result::ok);
 
@@ -535,10 +535,9 @@ pub struct PnConfig;
 
 impl PnConfig {
     fn new(config: Option<spacecrafts::PnConfig>) -> Option<Self> {
-        match config {
-            Some(_) => Some(Self {}),
-            None => None,
-        }
+        config.map(|_| {
+            Self{}
+        })
     }
 }
 
@@ -578,14 +577,13 @@ impl RSConfig {
 
 impl RSConfig {
     fn new(config: Option<spacecrafts::RSConfig>) -> Option<Self> {
-        match config {
-            Some(rs) => Some(Self {
+        config.map(|rs| {
+            RSConfig {
                 interleave: rs.interleave,
                 virtual_fill_length: rs.virtual_fill_length,
                 num_correctable: rs.num_correctable,
-            }),
-            None => None,
-        }
+            }
+        })
     }
 }
 
@@ -634,7 +632,8 @@ impl FramingConfig {
         self.length, self.insert_zone_length, self.trailer_length, pn, rs).to_string()
     }
 
-    /// Length of the RS codeblock.
+    /// Return the computed length of a CADU block, i.e., CADU length - ASM length, from 
+    /// our config.
     pub fn codeblock_len(&self) -> usize {
         match &self.reed_solomon {
             Some(rs) => self.length + 2 * rs.num_correctable as usize * rs.interleave as usize,
@@ -643,6 +642,25 @@ impl FramingConfig {
     }
 }
 
+/// Lookup the FramingConfig for a spacecraft.
+///
+/// This makes use of a spacecraftsdb formatted database file. See the releases at 
+/// https://github.com/bmflynn/spacecraftsdb to download a database file.
+///
+/// Parameters
+/// ----------
+/// scid : int
+///     The spacecraft identifier for a spacecraft.
+///
+/// path : str, optional
+///     Local path to a specific spacecraftsdb database file. If not provided this will 
+///     attempt to load the database from ./spacecraftsdb.json,
+///     $XDG_DATA_HOME/spacecraftsdb/spacecraftsdb.json, ~/.spacecraftsdb.json.
+///
+/// Returns
+/// -------
+/// FramingConfig or None
+///     The configuration for the specified spacecraft if available, otherwise `None`
 #[pyfunction]
 fn framing_config(scid: u16, path: Option<&str>) -> PyResult<Option<FramingConfig>> {
     match ccsds::framing_config(scid, path) {
